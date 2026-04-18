@@ -197,17 +197,19 @@ int index_load(Index *index) {
 // Sorts entries by path, writes to a temp file, fsyncs, then renames.
 // Returns 0 on success, -1 on error.
 int index_save(const Index *index) {
-    // Step 1: Make a mutable copy and sort by path
-    Index sorted = *index;
-    qsort(sorted.entries, sorted.count, sizeof(IndexEntry), compare_entries_by_path);
+    // Step 1: Make a heap-allocated mutable copy and sort by path
+    Index *sorted = malloc(sizeof(Index));
+    if (!sorted) return -1;
+    *sorted = *index;
+    qsort(sorted->entries, sorted->count, sizeof(IndexEntry), compare_entries_by_path);
 
     // Step 2: Write to temp file
     const char *tmp_path = INDEX_FILE ".tmp";
     FILE *f = fopen(tmp_path, "w");
-    if (!f) return -1;
+    if (!f) { free(sorted); return -1; }
 
-    for (int i = 0; i < sorted.count; i++) {
-        const IndexEntry *e = &sorted.entries[i];
+    for (int i = 0; i < sorted->count; i++) {
+        const IndexEntry *e = &sorted->entries[i];
         char hex[HASH_HEX_SIZE + 1];
         hash_to_hex(&e->hash, hex);
         fprintf(f, "%o %s %llu %u %s\n",
@@ -217,6 +219,7 @@ int index_save(const Index *index) {
                 (unsigned int)e->size,
                 e->path);
     }
+    free(sorted);
 
     // Step 3: Flush userspace buffers then fsync to disk
     if (fflush(f) != 0) {

@@ -17,8 +17,12 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+// index_load is in index.c which is not linked for test_tree.
+// Declare weak so the binary links; tree_from_index won't be called by test_tree.
+__attribute__((weak)) int index_load(Index *index) { (void)index; return -1; }
+
 // Forward declaration (implemented in object.c)
-int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+extern int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 

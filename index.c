@@ -1,20 +1,4 @@
-// index.c — Staging area implementation
-//
-// Text format of .pes/index (one entry per line, sorted by path):
-//
-//   <mode-octal> <64-char-hex-hash> <mtime-seconds> <size> <path>
-//
-// Example:
-//   100644 a1b2c3d4e5f6...  1699900000 42 README.md
-//   100644 f7e8d9c0b1a2...  1699900100 128 src/main.c
-//
-// This is intentionally a simple text format. No magic numbers, no
-// binary parsing. The focus is on the staging area CONCEPT (tracking
-// what will go into the next commit) and ATOMIC WRITES (temp+rename).
-//
-// PROVIDED functions: index_find, index_remove, index_status
-// TODO functions:     index_load, index_save, index_add
-
+#define _XOPEN_SOURCE 500
 #include "index.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,12 +8,9 @@
 #include <unistd.h>
 #include <dirent.h>
 
-// Forward declarations (implemented in object.c)
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 
-// ─── PROVIDED ────────────────────────────────────────────────────────────────
 
-// Find an index entry by path (linear scan).
 IndexEntry* index_find(Index *index, const char *path) {
     for (int i = 0; i < index->count; i++) {
         if (strcmp(index->entries[i].path, path) == 0)
@@ -38,8 +19,6 @@ IndexEntry* index_find(Index *index, const char *path) {
     return NULL;
 }
 
-// Remove a file from the index.
-// Returns 0 on success, -1 if path not in index.
 int index_remove(Index *index, const char *path) {
     for (int i = 0; i < index->count; i++) {
         if (strcmp(index->entries[i].path, path) == 0) {
@@ -55,16 +34,9 @@ int index_remove(Index *index, const char *path) {
     return -1;
 }
 
-// Print the status of the working directory.
-//
-// Identifies files that are staged, unstaged (modified/deleted in working dir),
-// and untracked (present in working dir but not in index).
-// Returns 0.
 int index_status(const Index *index) {
     printf("Staged changes:\n");
     int staged_count = 0;
-    // Note: A true Git implementation deeply diffs against the HEAD tree here. 
-    // For this lab, displaying indexed files represents the staging intent.
     for (int i = 0; i < index->count; i++) {
         printf("  staged:     %s\n", index->entries[i].path);
         staged_count++;
@@ -80,7 +52,6 @@ int index_status(const Index *index) {
             printf("  deleted:    %s\n", index->entries[i].path);
             unstaged_count++;
         } else {
-            // Fast diff: check metadata instead of re-hashing file content
             if (st.st_mtime != (time_t)index->entries[i].mtime_sec || st.st_size != (off_t)index->entries[i].size) {
                 printf("  modified:   %s\n", index->entries[i].path);
                 unstaged_count++;
@@ -96,25 +67,23 @@ int index_status(const Index *index) {
     if (dir) {
         struct dirent *ent;
         while ((ent = readdir(dir)) != NULL) {
-            // Skip hidden directories, parent directories, and build artifacts
             if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
             if (strcmp(ent->d_name, ".pes") == 0) continue;
-            if (strcmp(ent->d_name, "pes") == 0) continue; // compiled executable
-            if (strstr(ent->d_name, ".o") != NULL) continue; // object files
+            if (strcmp(ent->d_name, "pes") == 0) continue;
+            if (strstr(ent->d_name, ".o") != NULL) continue;
 
-            // Check if file is tracked in the index
             int is_tracked = 0;
             for (int i = 0; i < index->count; i++) {
                 if (strcmp(index->entries[i].path, ent->d_name) == 0) {
-                    is_tracked = 1; 
+                    is_tracked = 1;
                     break;
                 }
             }
-            
+
             if (!is_tracked) {
                 struct stat st;
                 stat(ent->d_name, &st);
-                if (S_ISREG(st.st_mode)) { // Only list regular files for simplicity
+                if (S_ISREG(st.st_mode)) {
                     printf("  untracked:  %s\n", ent->d_name);
                     untracked_count++;
                 }
@@ -128,30 +97,23 @@ int index_status(const Index *index) {
     return 0;
 }
 
-// ─── Implementation ──────────────────────────────────────────────────────────
 
-// Comparator for qsort — sorts IndexEntry array by path (for index_save)
 static int compare_entries_by_path(const void *a, const void *b) {
     return strcmp(((const IndexEntry *)a)->path, ((const IndexEntry *)b)->path);
 }
 
-// Load the index from .pes/index.
-// If the file does not exist, initializes an empty index (not an error).
-// Returns 0 on success, -1 on error.
 int index_load(Index *index) {
     index->count = 0;
 
     FILE *f = fopen(INDEX_FILE, "r");
     if (!f) {
-        // File doesn't exist yet — empty index is valid
         return 0;
     }
 
     char line[1024];
     while (fgets(line, sizeof(line), f)) {
-        // Trim trailing newline
         line[strcspn(line, "\r\n")] = '\0';
-        if (line[0] == '\0') continue; // skip blank lines
+        if (line[0] == '\0') continue;
 
         if (index->count >= MAX_INDEX_ENTRIES) {
             fclose(f);
@@ -160,14 +122,11 @@ int index_load(Index *index) {
 
         IndexEntry *e = &index->entries[index->count];
 
-        // Format: <mode-octal> <64-hex-hash> <mtime> <size> <path>
         char hex[HASH_HEX_SIZE + 1];
         unsigned long long mtime_val;
         unsigned int size_val;
         unsigned int mode_val;
 
-        // Read all fixed fields, then the path (which may contain spaces if needed)
-        // Use %511s to read the path token (no spaces expected in path for this impl)
         char path_buf[512];
         int parsed = sscanf(line, "%o %64s %llu %u %511s",
                             &mode_val, hex, &mtime_val, &size_val, path_buf);
@@ -193,17 +152,12 @@ int index_load(Index *index) {
     return 0;
 }
 
-// Save the index to .pes/index atomically.
-// Sorts entries by path, writes to a temp file, fsyncs, then renames.
-// Returns 0 on success, -1 on error.
 int index_save(const Index *index) {
-    // Step 1: Make a heap-allocated mutable copy and sort by path
     Index *sorted = malloc(sizeof(Index));
     if (!sorted) return -1;
     *sorted = *index;
     qsort(sorted->entries, sorted->count, sizeof(IndexEntry), compare_entries_by_path);
 
-    // Step 2: Write to temp file
     const char *tmp_path = INDEX_FILE ".tmp";
     FILE *f = fopen(tmp_path, "w");
     if (!f) { free(sorted); return -1; }
@@ -221,7 +175,6 @@ int index_save(const Index *index) {
     }
     free(sorted);
 
-    // Step 3: Flush userspace buffers then fsync to disk
     if (fflush(f) != 0) {
         fclose(f);
         unlink(tmp_path);
@@ -234,7 +187,6 @@ int index_save(const Index *index) {
     }
     fclose(f);
 
-    // Step 4: Atomic rename
     if (rename(tmp_path, INDEX_FILE) != 0) {
         unlink(tmp_path);
         return -1;
@@ -243,11 +195,7 @@ int index_save(const Index *index) {
     return 0;
 }
 
-// Stage a file for the next commit.
-// Reads the file, writes it as OBJ_BLOB, and updates/appends the index entry.
-// Returns 0 on success, -1 on error.
 int index_add(Index *index, const char *path) {
-    // Step 1: Open and read the file
     FILE *f = fopen(path, "rb");
     if (!f) {
         fprintf(stderr, "error: cannot open '%s'\n", path);
@@ -277,14 +225,12 @@ int index_add(Index *index, const char *path) {
         return -1;
     }
 
-    // Step 2: Get file metadata (stat for mtime, size, mode)
     struct stat st;
     if (lstat(path, &st) != 0) {
         free(buf);
         return -1;
     }
 
-    // Step 3: Write blob to object store
     ObjectID blob_id;
     if (object_write(OBJ_BLOB, buf, nread, &blob_id) != 0) {
         free(buf);
@@ -292,14 +238,12 @@ int index_add(Index *index, const char *path) {
     }
     free(buf);
 
-    // Step 4: Determine mode
     uint32_t mode;
     if (st.st_mode & S_IXUSR)
         mode = 0100755;
     else
         mode = 0100644;
 
-    // Step 5: Update existing entry or append new one
     IndexEntry *existing = index_find(index, path);
     if (existing) {
         existing->hash     = blob_id;
@@ -317,6 +261,5 @@ int index_add(Index *index, const char *path) {
         e->path[sizeof(e->path) - 1] = '\0';
     }
 
-    // Step 6: Persist the updated index
     return index_save(index);
 }

@@ -1,16 +1,9 @@
-// test_objects.c — Phase 1 test program
-//
-// Compile and run:
-//   gcc -Wall -Wextra -O2 -o test_objects test_objects.c object.c -lcrypto
-//   ./test_objects
-
 #include "pes.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
 
-// Forward declarations for object.c functions
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out);
 int object_exists(const ObjectID *id);
@@ -31,7 +24,6 @@ void test_blob_storage(void) {
     object_path(&id, path, sizeof(path));
     printf("Object stored at: %s\n", path);
 
-    // Read it back and verify
     ObjectType type;
     void *data;
     size_t len;
@@ -62,7 +54,6 @@ void test_integrity(void) {
     ObjectID id;
     object_write(OBJ_BLOB, content, strlen(content), &id);
 
-    // Corrupt the stored file
     char path[512];
     object_path(&id, path, sizeof(path));
 
@@ -72,18 +63,16 @@ void test_integrity(void) {
     fputc('X', f);
     fclose(f);
 
-    // Read should detect corruption
     ObjectType type;
     void *data;
     size_t len;
     int rc = object_read(&id, &type, &data, &len);
-    assert(rc == -1);  // Must fail integrity check
+    assert(rc == -1);
 
     printf("PASS: integrity check\n");
 }
 
 int main(void) {
-    // Clean slate
     int rc __attribute__((unused));
     rc = system("rm -rf .pes");
     rc = system("mkdir -p .pes/objects .pes/refs/heads");
